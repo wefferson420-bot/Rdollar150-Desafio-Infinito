@@ -1,16 +1,41 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
 import { Route, Switch, useLocation, Router as WouterRouter, Link, useParams } from 'wouter';
-import { ArrowDownLeft, ArrowLeft, ArrowRight, Award, Bolt, Check, ChevronRight, CircleHelp, Coins, Crown, Flame, Gamepad2, Gem, Heart, Home, LockKeyhole, Medal, Play, RotateCcw, ShoppingBag, Sparkles, Star, Target, Trophy, UserRound, Zap, type LucideIcon } from 'lucide-react';
-import { COSMETICS, completeGame, getLevel, getLevelProgress, purchaseCosmetic, selectCosmetic, useArcadeState, type Cosmetic, type GameCompletion, type GameId, type StoreResult } from '@/lib/arcade-state';
+import { ArrowDownLeft, ArrowRight, Award, Bolt, Check, ChevronRight, CircleHelp, Coins, Crown, Flame, Gamepad2, Gem, Heart, Home, LockKeyhole, Medal, Play, ShoppingBag, Sparkles, Star, Target, Trophy, UserRound, Zap, type LucideIcon } from 'lucide-react';
+import {
+  COSMETICS,
+  claimMission,
+  completeGame,
+  getCurrentDailyStreak,
+  getLevel,
+  getLevelProgress,
+  getMissions,
+  getNextRankTier,
+  getRankProgress,
+  getRankTier,
+  getSeasonDaysRemaining,
+  purchaseCosmetic,
+  refreshSeason,
+  selectCosmetic,
+  useArcadeState,
+  type Cosmetic,
+  type GameCompletion,
+  type GamePerformance,
+  type GameId,
+  type PlayableGameId,
+  type StoreResult,
+} from '@/lib/arcade-state';
+import { GameSession } from '@/components/games/GameSession';
+import { RunnerSprite } from '@/components/games/RunnerSprite';
+import { AboutPage, CoinShopPage, MissionsPage, RankingPage } from '@/pages/meta-pages';
 
 const queryClient = new QueryClient();
 
-export type GameScore = { gameId: GameId; score: number; completedAt: Date };
+export type GameScore = { gameId: PlayableGameId; score: number; completedAt: Date; performance?: GamePerformance };
 export type Purchase = { itemId: string };
 export type CosmeticSelection = { itemId: string };
 export type ArcadeCallbacks = {
@@ -19,11 +44,11 @@ export type ArcadeCallbacks = {
   onCosmeticSelect?: (selection: CosmeticSelection) => boolean;
 };
 
-type GameDefinition = { id: GameId; name: string; description: string; category: string; duration: string; icon: LucideIcon; color: string; score: string };
+type GameDefinition = { id: PlayableGameId; name: string; description: string; category: string; duration: string; icon: LucideIcon; color: string; score: string };
 const games: GameDefinition[] = [
-  { id: 'reflexo', name: 'Reflexo relâmpago', description: 'Toque no sinal assim que ele acender.', category: 'REFLEXO', duration: '20 SEG', icon: Bolt, color: 'lime', score: 'Pontue por reflexo' },
-  { id: 'memoria', name: 'Memória de bolso', description: 'Encontre os pares antes do tempo acabar.', category: 'MEMÓRIA', duration: '45 SEG', icon: Gem, color: 'violet', score: 'Até 80 pts' },
-  { id: 'toque-rapido', name: 'Toque turbo', description: 'Quantos toques cabem em 10 segundos?', category: 'VELOCIDADE', duration: '10 SEG', icon: Zap, color: 'orange', score: 'Um ponto por toque' },
+  { id: 'reflexo', name: 'Reflexo relâmpago', description: 'Toque nos sinais verdadeiros e desvie das distrações.', category: 'REFLEXO', duration: '20 SEG', icon: Bolt, color: 'lime', score: 'Precisão e velocidade' },
+  { id: 'memoria', name: 'Memória de bolso', description: 'Encontre os pares e avance para tabuleiros maiores.', category: 'MEMÓRIA', duration: 'POR NÍVEL', icon: Gem, color: 'violet', score: '4+ pares por nível' },
+  { id: 'corrida', name: 'Corrida Infinita', description: 'Pule os obstáculos e descubra até onde vai.', category: 'CORRIDA', duration: 'SEM LIMITE', icon: Zap, color: 'orange', score: 'Distância em metros' },
 ];
 
 const shopItems = COSMETICS.map((item) => ({
@@ -36,30 +61,16 @@ function formatCoins(coins: number): string {
   return new Intl.NumberFormat('pt-BR').format(coins);
 }
 
-function todayKey(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-}
-
 function formattedDate(date: Date | string): string {
   return new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(date));
 }
 
-function gameUnit(gameId: GameId): string {
-  return gameId === 'toque-rapido' ? 'toques' : 'pts';
-}
-
-function currentStreak(state: ReturnType<typeof useArcadeState>): number {
-  if (!state.lastDailyDate) return 0;
-  const today = todayKey();
-  if (state.lastDailyDate === today) return state.dailyStreak;
-  const nextDate = new Date(`${state.lastDailyDate}T12:00:00`);
-  nextDate.setDate(nextDate.getDate() + 1);
-  return todayKeyFromDate(nextDate) === today ? state.dailyStreak : 0;
-}
-
-function todayKeyFromDate(date: Date): string {
+function localDateKey(date = new Date()): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function gameUnit(gameId: GameId): string {
+  return gameId === 'corrida' ? 'm' : 'pts';
 }
 
 function ownsCosmetic(state: ReturnType<typeof useArcadeState>, item: Cosmetic): boolean {
@@ -74,29 +85,34 @@ function BrandMark() {
 
 function Wallet() {
   const { coins } = useArcadeState();
-  return <div className="wallet" data-testid="text-wallet-balance"><span className="coin-icon"><Coins size={15} /></span><strong>{formatCoins(coins)}</strong><span className="wallet-label">fichas</span><Link href="/shop" className="wallet-add" aria-label="Ver loja" data-testid="button-wallet-shop"><ArrowRight size={14} /></Link></div>;
+  return <div className="wallet" data-testid="text-wallet-balance"><span className="coin-icon"><Coins size={15} /></span><strong>{formatCoins(coins)}</strong><span className="wallet-label">fichas</span><Link href="/coin-shop" className="wallet-add" aria-label="Ver pacotes de fichas" data-testid="button-wallet-shop"><ArrowRight size={14} /></Link></div>;
 }
 
 function Shell({ children, active = 'inicio' }: { children: React.ReactNode; active?: string }) {
   const state = useArcadeState();
-  const streak = currentStreak(state);
-  const nav = [
+  const streak = getCurrentDailyStreak(state);
+  const primaryNav = [
     { href: '/', label: 'Início', id: 'inicio', icon: Home },
     { href: '/games', label: 'Jogar', id: 'jogar', icon: Gamepad2 },
     { href: '/shop', label: 'Loja', id: 'loja', icon: ShoppingBag },
     { href: '/profile', label: 'Perfil', id: 'perfil', icon: UserRound },
   ];
+  const extraNav = [
+    { href: '/ranking', label: 'Temporada', id: 'ranking', icon: Trophy },
+    { href: '/missions', label: 'Missões', id: 'missions', icon: Target },
+  ];
+  const desktopNav = [...primaryNav, ...extraNav];
   return <div className="app-shell">
     <aside className="desktop-rail">
-      <Link href="/" className="logo-link" data-testid="link-home-logo"><BrandMark /></Link>
+      <Link href="/about" className="logo-link" aria-label="Sobre R$1,50 — Desafio Infinito" data-testid="link-home-logo"><BrandMark /></Link>
       <div className="rail-label">ARCADE</div>
-      <nav className="rail-nav">{nav.map(item => <Link key={item.id} href={item.href} className={`rail-link ${active === item.id ? 'selected' : ''}`} data-testid={`link-nav-${item.id}`}><item.icon size={19} /><span>{item.label}</span></Link>)}</nav>
-      <div className="rail-bottom"><div className="rail-status"><span className="online-dot" />DESAFIO DO DIA<br /><b>disponível</b></div><div className="rail-avatar">L</div></div>
+      <nav className="rail-nav">{desktopNav.map(item => <Link key={item.id} href={item.href} className={`rail-link ${active === item.id ? 'selected' : ''}`} data-testid={`link-nav-${item.id}`}><item.icon size={19} /><span>{item.label}</span></Link>)}</nav>
+      <div className="rail-bottom"><div className="rail-status"><span className="online-dot" />DESAFIO DO DIA<br /><b>disponível</b></div><Link href="/about" className="rail-about-link">Sobre o jogo</Link><div className="rail-avatar">L</div></div>
     </aside>
     <main className="main-frame">
-      <header className="topbar"><Link href="/" className="mobile-brand" data-testid="link-home-mobile"><BrandMark /></Link><div className="topbar-spacer" /><div className="streak-pill"><Flame size={15} /><span>{streak} {streak === 1 ? 'dia' : 'dias'}</span></div><Wallet /><Link href="/profile" className="avatar-button" aria-label="Abrir perfil" data-testid="button-open-profile">J</Link></header>
+      <header className="topbar"><Link href="/about" className="mobile-brand" aria-label="Sobre R$1,50 — Desafio Infinito" data-testid="link-home-mobile"><BrandMark /></Link><div className="topbar-spacer" /><div className="streak-pill"><Flame size={15} /><span>{streak} {streak === 1 ? 'dia' : 'dias'}</span></div><Wallet /><Link href="/profile" className="avatar-button" aria-label="Abrir perfil" data-testid="button-open-profile">J</Link></header>
       <div className="content-area">{children}</div>
-      <nav className="bottom-nav">{nav.map(item => <Link key={item.id} href={item.href} className={`bottom-link ${active === item.id ? 'selected' : ''}`} data-testid={`link-bottom-${item.id}`}><item.icon size={20} /><span>{item.label}</span></Link>)}</nav>
+      <nav className="bottom-nav">{primaryNav.map(item => <Link key={item.id} href={item.href} className={`bottom-link ${active === item.id ? 'selected' : ''}`} data-testid={`link-bottom-${item.id}`}><item.icon size={20} /><span>{item.label}</span></Link>)}</nav>
     </main>
   </div>;
 }
@@ -105,10 +121,10 @@ function SectionEyebrow({ children }: { children: React.ReactNode }) { return <d
 
 function HomePage() {
   const state = useArcadeState();
-  const streak = currentStreak(state);
+  const streak = getCurrentDailyStreak(state);
   const level = getLevel(state.totalXp);
   const levelProgress = getLevelProgress(state.totalXp);
-  const dailyComplete = state.lastDailyDate === todayKey();
+  const dailyComplete = state.lastDailyDate === localDateKey();
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Bom dia' : hour < 18 ? 'Boa tarde' : 'Boa noite';
   const dateLabel = new Intl.DateTimeFormat('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' }).format(new Date());
@@ -122,6 +138,14 @@ function HomePage() {
     </section>
     <div className="section-heading"><div><SectionEyebrow>UM MINUTO PRA VOCÊ</SectionEyebrow><h2>Vai mais uma?</h2></div><Link href="/games" className="text-link" data-testid="link-all-games">Ver todos <ArrowRight size={15} /></Link></div>
     <div className="quick-games">{games.slice(0, 2).map((game, i) => <GameTile key={game.id} game={game} index={i} />)}</div>
+     <Link href="/play/corrida" className="race-feature" data-testid="card-game-corrida">
+       <div className="race-feature-copy"><SectionEyebrow>NOVO MODO · SEM CRONÔMETRO</SectionEyebrow><h3>Corrida <i>Infinita</i></h3><p>Pule obstáculos, aumente o ritmo e busque sua maior distância.</p><span>COMEÇAR CORRIDA <ArrowRight size={14} /></span></div>
+       <div className="race-feature-art"><div className="race-feature-glow" /><RunnerSprite characterId={state.selectedCharacterId} skinId={state.selectedSkinId} running /></div>
+     </Link>
+     <div className="home-meta-links">
+       <Link href="/ranking" className="home-meta-link"><span className="home-meta-icon rank"><Trophy size={17} /></span><span><small>TEMPORADA LOCAL</small><strong>{getRankTier(state.season.points).label} · {formatCoins(state.season.points)} pts</strong></span><ArrowRight size={14} /></Link>
+       <Link href="/missions" className="home-meta-link"><span className="home-meta-icon mission"><Target size={17} /></span><span><small>OBJETIVOS DO ARCADE</small><strong>Missões e recompensas</strong></span><ArrowRight size={14} /></Link>
+     </div>
     <section className="progress-strip"><div className="progress-icon"><Trophy size={20} /></div><div className="progress-copy"><b>{levelProgress >= 75 ? 'Quase lá!' : 'Seu próximo nível'}</b><span>Mais {100 - levelProgress} XP para avançar.</span></div><div className="progress-value">{levelProgress} <small>/ 100 XP</small></div><div className="xp-track"><span style={{ width: `${levelProgress}%` }} /></div></section>
     <p className="no-bet-note"><LockKeyhole size={13} /> Só diversão: aqui suas fichas são virtuais e não têm valor em dinheiro.</p>
   </div></Shell>;
@@ -134,7 +158,7 @@ function GameTile({ game, index = 0 }: { game: typeof games[number]; index?: num
 
 function GamesPage() {
   const [filter, setFilter] = useState('TODOS');
-  const filters = ['TODOS', 'REFLEXO', 'MEMÓRIA', 'VELOCIDADE'];
+  const filters = ['TODOS', 'REFLEXO', 'MEMÓRIA', 'CORRIDA'];
   const visible = filter === 'TODOS' ? games : games.filter(g => g.category === filter);
   return <Shell active="jogar"><div className="page-wrap">
     <div className="page-heading"><div><SectionEyebrow>ESCOLHA SEU DESAFIO</SectionEyebrow><h1>Qual vai ser?</h1><p>Partidas rápidas. Recordes que duram.</p></div><div className="heading-mark"><Gamepad2 size={28} /></div></div>
@@ -146,108 +170,9 @@ function GamesPage() {
 
 function PlayPage({ onGameComplete }: Pick<ArcadeCallbacks, 'onGameComplete'>) {
   const { gameId = 'reflexo' } = useParams<{ gameId: string }>();
-  const gameExists = games.some((candidate) => candidate.id === gameId);
-  const game = games.find(g => g.id === gameId) || games[0];
-  const state = useArcadeState();
-  const [phase, setPhase] = useState<'ready' | 'playing' | 'done'>('ready');
-  const [score, setScore] = useState(0);
-  const [time, setTime] = useState(gameId === 'memoria' ? 45 : gameId === 'reflexo' ? 20 : 10);
-  const [lit, setLit] = useState(false);
-  const [cards, setCards] = useState<number[]>([]);
-  const [flipped, setFlipped] = useState<number[]>([]);
-  const [matched, setMatched] = useState<number[]>([]);
-  const [tapCount, setTapCount] = useState(0);
-  const [resultSent, setResultSent] = useState(false);
-  const [early, setEarly] = useState(false);
-  const [completion, setCompletion] = useState<GameCompletion | null>(null);
-  const litAt = useRef<number | null>(null);
-  const totalTime = game.id === 'memoria' ? 45 : game.id === 'reflexo' ? 20 : 10;
-  const bestScore = state.bestScores[game.id] ?? 0;
-  useEffect(() => {
-    setPhase('ready');
-    setScore(0);
-    setTime(totalTime);
-    setLit(false);
-    setCards([]);
-    setFlipped([]);
-    setMatched([]);
-    setTapCount(0);
-    setResultSent(false);
-    setCompletion(null);
-    setEarly(false);
-    litAt.current = null;
-  }, [gameId, totalTime]);
-  useEffect(() => {
-    if (phase !== 'playing' || gameId !== 'reflexo') return;
-    setLit(false);
-    litAt.current = null;
-    const delay = window.setTimeout(() => {
-      litAt.current = Date.now();
-      setLit(true);
-    }, 900 + Math.random() * 1800);
-    return () => window.clearTimeout(delay);
-  }, [phase, gameId, score]);
-  useEffect(() => {
-    if (phase !== 'playing') return;
-    const tick = window.setInterval(() => setTime(t => {
-      if (t <= 1) { window.clearInterval(tick); setPhase('done'); return 0; }
-      return t - 1;
-    }), 1000);
-    return () => window.clearInterval(tick);
-  }, [phase]);
-  useEffect(() => {
-    if (phase === 'done' && !resultSent) {
-      setResultSent(true);
-      const result = onGameComplete?.({ gameId: game.id, score, completedAt: new Date() });
-      setCompletion(result ?? null);
-    }
-  }, [phase, resultSent, onGameComplete, game.id, gameId, score]);
-  useEffect(() => {
-    if (gameId === 'memoria' && phase === 'playing' && cards.length === 0) setCards([0, 1, 2, 3, 4, 5, 6, 7].sort(() => Math.random() - .5).map(n => n % 4));
-  }, [gameId, phase, cards.length]);
-  useEffect(() => {
-    if (flipped.length !== 2) return;
-    const [a, b] = flipped;
-    if (cards[a] === cards[b]) {
-      const timer = window.setTimeout(() => { setMatched(current => [...current, a, b]); setFlipped([]); setScore(s => s + 20); }, 350);
-      return () => window.clearTimeout(timer);
-    }
-    const timer = window.setTimeout(() => setFlipped([]), 700);
-    return () => window.clearTimeout(timer);
-  }, [flipped, cards]);
-  useEffect(() => {
-    if (gameId === 'memoria' && phase === 'playing' && matched.length === 8) {
-      setPhase('done');
-    }
-  }, [gameId, phase, matched.length]);
-  const begin = () => { setPhase('playing'); setTime(totalTime); setScore(0); setTapCount(0); setResultSent(false); setCompletion(null); setMatched([]); setFlipped([]); setCards([]); setEarly(false); setLit(false); litAt.current = null; };
-  const handleReflex = () => {
-    if (phase !== 'playing') return;
-    if (!lit) { setEarly(true); setScore(s => Math.max(0, s - 5)); return; }
-    const reactionMs = Date.now() - (litAt.current ?? Date.now());
-    const points = Math.max(5, 100 - Math.floor(reactionMs / 5));
-    setScore(s => Math.min(1000, s + points));
-    setLit(false);
-    litAt.current = null;
-  };
-  const handleTap = () => { if (phase !== 'playing') return; const next = tapCount + 1; setTapCount(next); setScore(next); };
-  const pressCard = (index: number) => { if (phase !== 'playing' || flipped.length === 2 || flipped.includes(index) || matched.includes(index)) return; setFlipped(v => [...v, index]); };
-  const visibleScore = gameId === 'toque-rapido' ? tapCount : score;
-  const recentResult = state.recentResults.find((result) => result.gameId === game.id);
-  if (!gameExists) return <NotFound />;
-  return <Shell active="jogar"><div className="play-wrap">
-    <Link href="/games" className="back-link" data-testid="link-back-games"><ArrowLeft size={15} /> Todos os jogos</Link>
-    <div className="play-top"><div><SectionEyebrow>{game.category} · PARTIDA RÁPIDA</SectionEyebrow><h1>{game.name}</h1><p>{game.description}</p></div><div className="timer-badge"><span>TEMPO</span><strong className={time <= 5 && phase === 'playing' ? 'timer-low' : ''}>00:{String(time).padStart(2, '0')}</strong></div></div>
-    <div className={`game-stage stage-${gameId}`} data-testid="game-stage">
-      {phase === 'ready' && <div className="stage-ready"><div className={`ready-symbol tone-${game.color}`}><game.icon size={36} /></div><span className="stage-kicker">PRONTO PRA JOGAR?</span><h2>Um, dois...<br /><i>valendo.</i></h2><p>Você tem {totalTime} segundos. Dê o seu melhor.</p><button className="button-primary" onClick={begin} data-testid="button-start-game"><Play size={16} fill="currentColor" /> Começar partida</button></div>}
-      {phase === 'playing' && gameId === 'reflexo' && <div className="reflex-game"><span className="stage-kicker">{early ? 'CALMA! ESPERE O SINAL' : lit ? 'AGORA!' : 'FIQUE DE OLHO...'}</span><button aria-label={lit ? 'Toque agora' : 'Aguarde o sinal'} className={`reflex-target ${lit ? 'is-lit' : ''}`} onClick={handleReflex} data-testid="button-reflex-target"><span>{lit ? 'TOQUE!' : '...'}</span></button><p>{lit ? 'Vai, vai, vai!' : 'Toque só quando a luz acender'}</p></div>}
-      {phase === 'playing' && gameId === 'toque-rapido' && <div className="tap-game"><span className="stage-kicker">TOQUE SEM PARAR</span><button className="tap-target" onClick={handleTap} aria-label="Toque para pontuar" data-testid="button-tap-target"><Zap size={48} fill="currentColor" /><span>TOCA!</span></button><p>Um toque por vez. Sem perder o ritmo.</p></div>}
-      {phase === 'playing' && gameId === 'memoria' && <div className="memory-game"><span className="stage-kicker">ACHE OS PARES</span><div className="memory-grid">{cards.map((symbol, index) => <button key={index} className={`memory-card ${flipped.includes(index) || matched.includes(index) ? 'turned' : ''} ${matched.includes(index) ? 'matched' : ''}`} onClick={() => pressCard(index)} aria-label={`Carta ${index + 1}`} data-testid={`button-memory-card-${index}`}>{flipped.includes(index) || matched.includes(index) ? ['A', 'B', 'C', 'D'][symbol] : '?'}</button>)}</div><p>{matched.length === 8 ? 'Mandou bem! Todos os pares encontrados.' : 'Sua memória está afiada?'}</p></div>}
-      {phase === 'done' && <div className="stage-done"><div className="done-medal"><Trophy size={32} /></div><span className="stage-kicker">FIM DE JOGO</span><h2>Boa partida<span>.</span></h2><div className="result-score"><strong>{visibleScore}</strong><small>{gameId === 'toque-rapido' ? 'TOQUES' : 'PONTOS'}</small></div><p className={completion ? 'result-reward' : undefined}>{completion ? `+${completion.coinsEarned} fichas virtuais${completion.dailyBonus ? ` · inclui bônus diário de ${completion.dailyBonus}` : ''}` : 'Mais uma rodada e esse recorde é seu.'}</p><div className="result-actions"><button className="button-primary" onClick={begin} data-testid="button-play-again"><RotateCcw size={15} /> Jogar de novo</button><Link href="/games" className="button-quiet" data-testid="link-choose-game">Escolher outro</Link></div></div>}
-    </div>
-    <div className="play-scorebar"><div><span>PONTUAÇÃO</span><strong data-testid="text-live-score">{visibleScore}<small> {gameUnit(game.id)}</small></strong></div><div className="scorebar-divider" /><div><span>SEU RECORDE</span><strong>{bestScore}<small> {gameUnit(game.id)}</small></strong></div><div className="play-tip"><Sparkles size={15} /> {phase === 'playing' ? 'Você consegue!' : recentResult ? `Última partida: ${formattedDate(recentResult.playedAt)}` : 'Cada partida te deixa mais perto.'}</div></div>
-    <p className="play-disclaimer"><LockKeyhole size={13} /> Desafio de habilidade. As fichas ganhas são virtuais e não podem ser convertidas em dinheiro.</p>
-  </div></Shell>;
+  const game = games.find((candidate) => candidate.id === gameId);
+  if (!game) return <NotFound />;
+  return <Shell active="jogar"><GameSession key={game.id} game={game} onGameComplete={onGameComplete} /></Shell>;
 }
 
 function ShopPage({ onPurchase, onCosmeticSelect }: Pick<ArcadeCallbacks, 'onPurchase' | 'onCosmeticSelect'>) {
