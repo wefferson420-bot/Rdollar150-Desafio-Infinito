@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "R$1,50 — Desafio Infinito"
+description = "Um app mobile-first em português com minijogos rápidos, desafios, moedas virtuais, personagens e progresso salvo no dispositivo."
+version = "1.0.0"
+id = "artifacts/desafio-infinito"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 24613
+
+[services.development]
+run = "pnpm --filter @workspace/desafio-infinito run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/desafio-infinito", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/desafio-infinito/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "24613"
+BASE_PATH = "/"
