@@ -1,0 +1,1 @@
+- [Desafio Infinito: progress and rewards](arcade-progression.md) — Preserve local progress; keep seasons personal and virtual currency clearly non-monetary.

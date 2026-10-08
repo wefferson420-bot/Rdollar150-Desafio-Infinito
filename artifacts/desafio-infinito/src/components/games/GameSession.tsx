@@ -4,6 +4,8 @@ import { Link } from 'wouter';
 import {
   getMemoryPairCount,
   getMemoryTimeLimit,
+  getLevel,
+  getRankTier,
   useArcadeState,
   type GameCompletion,
   type GamePerformance,
@@ -180,11 +182,24 @@ export function GameSession({ game, onGameComplete }: GameSessionProps) {
               <strong>{score}</strong>
               <small>{game.id === 'corrida' ? 'METROS' : 'PONTOS'}</small>
             </div>
-            <p className="result-reward">
-              {completion
-                ? `+${completion.coinsEarned} fichas virtuais · +${completion.xpEarned} XP · +${completion.rankPointsEarned} pontos de temporada${completion.dailyBonus ? ` · inclui bônus diário de ${completion.dailyBonus}` : ''}`
-                : 'Seu resultado foi salvo neste dispositivo.'}
-            </p>
+            {completion ? (
+              <div className="session-reward-stack" data-testid="game-rewards" aria-live="polite">
+                <div className="session-reward-coins"><span>+{completion.coinsEarned}</span> fichas virtuais{completion.dailyBonus ? ` · bônus diário +${completion.dailyBonus}` : ''}</div>
+                <div className="session-reward-xp"><span>+{completion.xpEarned}</span> XP · +{completion.rankPointsEarned} pontos de temporada</div>
+              </div>
+            ) : (
+              <p className="result-reward">Seu resultado foi salvo neste dispositivo.</p>
+            )}
+            {completion?.leveledUp && (
+              <div className="session-progression-pop level-up" data-testid="notice-level-up">
+                <Sparkles size={15} /> NÍVEL {String(getLevel(state.totalXp)).padStart(2, '0')} DESBLOQUEADO
+              </div>
+            )}
+            {completion?.rankedUp && (
+              <div className="session-progression-pop rank-up" data-testid="notice-rank-up">
+                <Trophy size={15} /> NOVA CATEGORIA: {getRankTier(state.season.points).label.toUpperCase()}
+              </div>
+            )}
             {game.id === 'reflexo' && (
               <div className="result-detail">
                 <span>{performance.reflexReactionsMs?.length ?? 0} acertos</span>

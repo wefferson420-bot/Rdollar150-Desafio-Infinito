@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { updateRaceAdaptation } from './race-generation';
 
 export type PlayableGameId = 'reflexo' | 'memoria' | 'corrida';
 export type GameId = PlayableGameId | 'toque-rapido';
@@ -24,6 +25,14 @@ export interface GameResult {
   gameId: GameId;
   score: number;
   coinsEarned: number;
+  playedAt: string;
+}
+
+export interface RaceBestRun {
+  distance: number;
+  score: number;
+  obstaclesCleared: number;
+  survivalMs: number;
   playedAt: string;
 }
 
@@ -78,6 +87,13 @@ export interface ArcadeState {
   bestReactionMs: number | null;
   raceBestDistance: number;
   raceTotalDistance: number;
+  raceBestScore: number;
+  raceBestObstacles: number;
+  raceBestSurvivalMs: number;
+  raceBestRun: RaceBestRun | null;
+  raceRecentPatternIds: string[];
+  raceRecentSequenceKeys: string[];
+  raceAdaptation: number;
   season: SeasonState;
   seasonHistory: SeasonRecord[];
   claimedMissionIds: string[];
@@ -85,6 +101,11 @@ export interface ArcadeState {
 
 export interface GamePerformance {
   distance?: number;
+  raceScore?: number;
+  obstaclesCleared?: number;
+  survivalMs?: number;
+  racePatternIds?: string[];
+  raceSequenceKeys?: string[];
   memoryLevel?: number;
   memoryCleared?: boolean;
   reflexReactionsMs?: number[];
@@ -101,6 +122,7 @@ export interface GameCompletion {
   xpEarned: number;
   rankPointsEarned: number;
   leveledUp: boolean;
+  rankedUp: boolean;
 }
 
 export interface MissionView {
@@ -183,6 +205,13 @@ const initialState: ArcadeState = {
   bestReactionMs: null,
   raceBestDistance: 0,
   raceTotalDistance: 0,
+  raceBestScore: 0,
+  raceBestObstacles: 0,
+  raceBestSurvivalMs: 0,
+  raceBestRun: null,
+  raceRecentPatternIds: [],
+  raceRecentSequenceKeys: [],
+  raceAdaptation: 0.42,
   season: createSeason(),
   seasonHistory: [],
   claimedMissionIds: [],
@@ -262,6 +291,20 @@ function migrateState(raw: Record<string, unknown>): ArcadeState {
   const selectedSkinId = typeof raw.selectedSkinId === 'string'
     ? raw.selectedSkinId
     : 'aurora';
+  const savedRaceBestRun = isRecord(raw.raceBestRun) &&
+    finiteNonNegative(raw.raceBestRun.distance, -1) >= 0 &&
+    finiteNonNegative(raw.raceBestRun.score, -1) >= 0 &&
+    finiteNonNegative(raw.raceBestRun.obstaclesCleared, -1) >= 0 &&
+    finiteNonNegative(raw.raceBestRun.survivalMs, -1) >= 0 &&
+    typeof raw.raceBestRun.playedAt === 'string'
+    ? {
+        distance: finiteNonNegative(raw.raceBestRun.distance),
+        score: finiteNonNegative(raw.raceBestRun.score),
+        obstaclesCleared: finiteNonNegative(raw.raceBestRun.obstaclesCleared),
+        survivalMs: finiteNonNegative(raw.raceBestRun.survivalMs),
+        playedAt: raw.raceBestRun.playedAt,
+      }
+    : null;
 
   return {
     ...initialState,
@@ -304,6 +347,17 @@ function migrateState(raw: Record<string, unknown>): ArcadeState {
       : null,
     raceBestDistance: finiteNonNegative(raw.raceBestDistance),
     raceTotalDistance: finiteNonNegative(raw.raceTotalDistance),
+    raceBestScore: finiteNonNegative(raw.raceBestScore, finiteNonNegative(bestScores.corrida)),
+    raceBestObstacles: finiteNonNegative(raw.raceBestObstacles),
+    raceBestSurvivalMs: finiteNonNegative(raw.raceBestSurvivalMs),
+    raceBestRun: savedRaceBestRun,
+    raceRecentPatternIds: Array.isArray(raw.raceRecentPatternIds)
+      ? raw.raceRecentPatternIds.filter((id): id is string => typeof id === 'string').slice(-8)
+      : [],
+    raceRecentSequenceKeys: Array.isArray(raw.raceRecentSequenceKeys)
+      ? raw.raceRecentSequenceKeys.filter((key): key is string => typeof key === 'string').slice(-8)
+      : [],
+    raceAdaptation: Math.min(1, finiteNonNegative(raw.raceAdaptation, 0.42)),
     season: savedSeason,
     seasonHistory: Array.isArray(raw.seasonHistory)
       ? raw.seasonHistory.filter((entry): entry is SeasonRecord => {
@@ -500,7 +554,6 @@ export function claimMission(missionId: string): boolean {
   refreshSeason();
   const mission = getMissions().find((item) => item.id === missionId);
   if (!mission?.claimable) return false;
-  const beforeLevel = getLevel(state.totalXp);
   state = {
     ...state,
     coins: state.coins + mission.coinsReward,
@@ -508,7 +561,7 @@ export function claimMission(missionId: string): boolean {
     claimedMissionIds: [...state.claimedMissionIds, missionId],
   };
   publish();
-  return getLevel(state.totalXp) >= beforeLevel;
+  return true;
 }
 
 export function completeGame(
@@ -526,6 +579,7 @@ export function completeGame(
 
   const score = Math.min(1_000_000, Math.floor(rawScore));
   const beforeLevel = getLevel(state.totalXp);
+  const beforeTierId = getRankTier(state.season.points).id;
   const today = localDateKey();
   const firstGameToday = state.lastDailyDate !== today;
   const dailyBonus = firstGameToday ? 20 : 0;
@@ -537,6 +591,15 @@ export function completeGame(
   const memoryLevel = Math.max(1, Math.floor(finiteNonNegative(performance.memoryLevel, state.memoryLevel)));
   const memoryCleared = gameId === 'memoria' && performance.memoryCleared === true;
   const distance = gameId === 'corrida' ? Math.floor(finiteNonNegative(performance.distance, score)) : 0;
+  const raceScore = gameId === 'corrida'
+    ? Math.floor(finiteNonNegative(performance.raceScore, distance))
+    : 0;
+  const obstaclesCleared = gameId === 'corrida'
+    ? Math.floor(finiteNonNegative(performance.obstaclesCleared))
+    : 0;
+  const survivalMs = gameId === 'corrida'
+    ? Math.floor(finiteNonNegative(performance.survivalMs))
+    : 0;
   const reactions = gameId === 'reflexo' && Array.isArray(performance.reflexReactionsMs)
     ? performance.reflexReactionsMs.filter((ms) => Number.isFinite(ms) && ms >= 0 && ms <= 10_000)
     : [];
@@ -557,6 +620,21 @@ export function completeGame(
     coinsEarned,
     playedAt: new Date().toISOString(),
   };
+  const raceBestRun = gameId === 'corrida' && raceScore > state.raceBestScore
+    ? {
+        distance,
+        score: raceScore,
+        obstaclesCleared,
+        survivalMs,
+        playedAt: result.playedAt,
+      }
+    : state.raceBestRun;
+  const racePatternIds = gameId === 'corrida' && Array.isArray(performance.racePatternIds)
+    ? performance.racePatternIds.filter((id): id is string => typeof id === 'string').slice(-8)
+    : [];
+  const raceSequenceKeys = gameId === 'corrida' && Array.isArray(performance.raceSequenceKeys)
+    ? performance.raceSequenceKeys.filter((key): key is string => typeof key === 'string').slice(-8)
+    : [];
 
   state = {
     ...state,
@@ -583,6 +661,19 @@ export function completeGame(
       : state.bestReactionMs,
     raceBestDistance: gameId === 'corrida' ? Math.max(state.raceBestDistance, distance) : state.raceBestDistance,
     raceTotalDistance: state.raceTotalDistance + distance,
+    raceBestScore: gameId === 'corrida' ? Math.max(state.raceBestScore, raceScore) : state.raceBestScore,
+    raceBestObstacles: gameId === 'corrida' ? Math.max(state.raceBestObstacles, obstaclesCleared) : state.raceBestObstacles,
+    raceBestSurvivalMs: gameId === 'corrida' ? Math.max(state.raceBestSurvivalMs, survivalMs) : state.raceBestSurvivalMs,
+    raceBestRun,
+    raceRecentPatternIds: gameId === 'corrida'
+      ? [...state.raceRecentPatternIds, ...racePatternIds].slice(-8)
+      : state.raceRecentPatternIds,
+    raceRecentSequenceKeys: gameId === 'corrida'
+      ? [...state.raceRecentSequenceKeys, ...raceSequenceKeys].slice(-8)
+      : state.raceRecentSequenceKeys,
+    raceAdaptation: gameId === 'corrida'
+      ? updateRaceAdaptation(state.raceAdaptation, distance, obstaclesCleared)
+      : state.raceAdaptation,
     season: { ...state.season, points: nextSeasonPoints },
   };
   publish();
@@ -594,6 +685,7 @@ export function completeGame(
     xpEarned,
     rankPointsEarned,
     leveledUp: getLevel(state.totalXp) > beforeLevel,
+    rankedUp: getRankTier(state.season.points).id !== beforeTierId,
   };
 }
 

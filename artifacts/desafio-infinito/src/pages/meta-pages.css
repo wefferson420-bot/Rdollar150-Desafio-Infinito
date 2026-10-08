@@ -79,6 +79,8 @@
 .history-info { display: flex; flex: 1; min-width: 110px; flex-direction: column; gap: 4px; }
 .history-info strong { font: 600 12px 'Space Grotesk',sans-serif; }
 .history-info > span { color: #888291; font-size: 9px; }
+.skin-unlock-badge { display:inline-flex; align-items:center; gap:4px; margin-top:4px; color:#edcc78 !important; font-size:8px !important; font-weight:700; animation:skin-unlock .5s cubic-bezier(.2,.8,.3,1.2) both; }
+@keyframes skin-unlock { from { opacity:0; transform:scale(.88); } to { opacity:1; transform:scale(1); } }
 .history-row .meta-reward-line { gap: 10px; }
 .history-row .meta-reward-line > span { font-size: 8px; }
 .meta-empty { display: flex; align-items: center; gap: 12px; padding: 17px; border: 1px dashed #3b3544; border-radius: 14px; background: #191820; }
@@ -151,6 +153,8 @@
 .coin-shop-notice button { width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 7px; color: #c5b7a4; background: transparent; font-size: 21px; cursor: pointer; }
 .coin-shop-notice button:hover { color: #fff0d4; background: #fff1; }
 .coin-shop-note { margin-top: 15px; }
+.meta-page .package-button { flex: 0 0 146px; width: 146px; min-width: 0; min-height: 42px; padding: 6px 8px; font-size: 8px; line-height: 1.25; text-align: center; white-space: normal; }
+.meta-page .package-button svg { flex: 0 0 auto; }
 
 .about-title-card { position: relative; isolation: isolate; overflow: hidden; display: grid; grid-template-columns: minmax(190px,.8fr) minmax(0,1.2fr); align-items: center; min-height: 255px; padding: 24px 29px; border: 1px solid #463852; border-radius: 19px; background: linear-gradient(112deg,#29213a,#32233a 60%,#402740); }
 .about-title-card::after { position: absolute; z-index: -1; content: ''; inset: 0; opacity: .16; background-image: radial-gradient(#f0d8ff .7px,transparent .7px); background-size: 17px 17px; }
@@ -230,7 +234,7 @@
   .coin-package { gap: 10px; padding: 11px; }
   .package-art { flex-basis: 39px; width: 39px; height: 39px; }
   .package-copy strong { font-size: 16px; }
-  .package-button { min-width: 88px; min-height: 36px; padding: 0 8px; font-size: 9px; }
+  .meta-page .package-button { flex-basis: 104px; width: 104px; min-width: 104px; min-height: 52px; padding: 6px 5px; font-size: 7px; line-height: 1.25; }
   .about-title-card { grid-template-columns: 1fr; gap: 2px; padding: 16px 20px 21px; }
   .about-title-art { width: 150px; height: 125px; }
   .about-orbit { width: 135px; height: 135px; }
@@ -246,5 +250,5 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .meta-page, .mission-card, .coin-shop-notice { animation: none; }
-  .meta-page *, .meta-page *::before, .meta-page *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
+  .meta-page *, .meta-page *::before, .meta-page *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }

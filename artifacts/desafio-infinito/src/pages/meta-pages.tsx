@@ -31,6 +31,7 @@ export type RankingPageProps = {
     points: number;
     coinsAwarded: number;
     xpAwarded: number;
+    cosmeticAwarded?: string;
     endedAt: string | Date;
   }[];
 };
@@ -160,7 +161,7 @@ export function RankingPage({
             {history.map((item) => (
               <article className="history-row" key={item.id}>
                 <span className="history-medal"><Trophy size={16} /></span>
-                <div className="history-info"><strong>{item.tierLabel}</strong><span>{date(item.endedAt)} · {number(item.points)} pontos</span></div>
+                <div className="history-info"><strong>{item.tierLabel}</strong><span>{date(item.endedAt)} · {number(item.points)} pontos</span>{item.cosmeticAwarded && <span className="skin-unlock-badge"><Sparkles size={11} /> Skin desbloqueada: {item.cosmeticAwarded.replace(/-/g, ' ')}</span>}</div>
                 <RewardLine coins={item.coinsAwarded} xp={item.xpAwarded} />
               </article>
             ))}
@@ -264,7 +265,7 @@ export function CoinShopPage({ balance }: CoinShopPageProps) {
             <div className="package-art" aria-hidden="true"><span className="package-coin"><Coins size={21} /></span><span className="package-spark"><Sparkles size={13} /></span></div>
             <div className="package-copy"><span>{pack.label}</span><strong>{number(pack.amount)} <small>fichas</small></strong><p>{pack.detail}</p></div>
             <button className="meta-button package-button" onClick={() => setNotice('Compra disponível na versão Android')} data-testid={`button-coin-package-${pack.amount}`}>
-              <Package size={15} /> Ver opção
+              <Package size={15} /> Compra disponível na versão Android
             </button>
           </article>
         ))}

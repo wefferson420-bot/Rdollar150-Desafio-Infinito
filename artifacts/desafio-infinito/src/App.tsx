@@ -27,6 +27,7 @@ import {
   type GamePerformance,
   type GameId,
   type PlayableGameId,
+  RANK_TIERS,
   type StoreResult,
 } from '@/lib/arcade-state';
 import { GameSession } from '@/components/games/GameSession';
@@ -124,6 +125,9 @@ function HomePage() {
   const streak = getCurrentDailyStreak(state);
   const level = getLevel(state.totalXp);
   const levelProgress = getLevelProgress(state.totalXp);
+  const bestRecord = games
+    .map((game) => ({ game, score: state.bestScores[game.id] ?? 0 }))
+    .sort((first, second) => second.score - first.score)[0];
   const dailyComplete = state.lastDailyDate === localDateKey();
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Bom dia' : hour < 18 ? 'Boa tarde' : 'Boa noite';
@@ -145,8 +149,10 @@ function HomePage() {
      <div className="home-meta-links">
        <Link href="/ranking" className="home-meta-link"><span className="home-meta-icon rank"><Trophy size={17} /></span><span><small>TEMPORADA LOCAL</small><strong>{getRankTier(state.season.points).label} · {formatCoins(state.season.points)} pts</strong></span><ArrowRight size={14} /></Link>
        <Link href="/missions" className="home-meta-link"><span className="home-meta-icon mission"><Target size={17} /></span><span><small>OBJETIVOS DO ARCADE</small><strong>Missões e recompensas</strong></span><ArrowRight size={14} /></Link>
+        <Link href="/shop" className="home-meta-link"><span className="home-meta-icon skins"><Sparkles size={17} /></span><span><small>VISUAL DO PERSONAGEM</small><strong>Loja, personagens e skins</strong></span><ArrowRight size={14} /></Link>
+        <Link href="/profile" className="home-meta-link"><span className="home-meta-icon record"><Award size={17} /></span><span><small>SEU MELHOR RESULTADO</small><strong>{bestRecord.score ? `${bestRecord.game.name}: ${formatCoins(bestRecord.score)} ${gameUnit(bestRecord.game.id)}` : 'Jogue para criar seu recorde'}</strong></span><ArrowRight size={14} /></Link>
      </div>
-    <section className="progress-strip"><div className="progress-icon"><Trophy size={20} /></div><div className="progress-copy"><b>{levelProgress >= 75 ? 'Quase lá!' : 'Seu próximo nível'}</b><span>Mais {100 - levelProgress} XP para avançar.</span></div><div className="progress-value">{levelProgress} <small>/ 100 XP</small></div><div className="xp-track"><span style={{ width: `${levelProgress}%` }} /></div></section>
+      <section className="progress-strip"><div className="progress-icon"><Trophy size={20} /></div><div className="progress-copy"><b>{levelProgress >= 75 ? 'Quase lá!' : 'Seu próximo nível'}</b><span>{formatCoins(state.totalXp)} XP acumulados · mais {100 - levelProgress} para avançar.</span></div><div className="progress-value">{levelProgress} <small>/ 100 XP</small></div><div className="xp-track"><span style={{ width: `${levelProgress}%` }} /></div></section>
     <p className="no-bet-note"><LockKeyhole size={13} /> Só diversão: aqui suas fichas são virtuais e não têm valor em dinheiro.</p>
   </div></Shell>;
 }
@@ -181,7 +187,7 @@ function ShopPage({ onPurchase, onCosmeticSelect }: Pick<ArcadeCallbacks, 'onPur
   const [notice, setNotice] = useState('');
   const categories = ['TUDO', 'PERSONAGENS', 'VISUAIS'];
   const filtered = shopItems.filter(item => activeTab === 'TUDO' || (activeTab === 'PERSONAGENS' ? item.type === 'PERSONAGEM' : item.type !== 'PERSONAGEM'));
-  const featured = shopItems.find((item) => item.id === 'nina-neon')!;
+  const featured = shopItems.find((item) => item.id === 'nina-neon') ?? shopItems[0];
   const owned = (item: Cosmetic) => ownsCosmetic(state, item);
   const equipped = (item: Cosmetic) => item.kind === 'personagem'
     ? state.selectedCharacterId === item.id
@@ -197,6 +203,9 @@ function ShopPage({ onPurchase, onCosmeticSelect }: Pick<ArcadeCallbacks, 'onPur
       setNotice(`${item.name} comprado com fichas virtuais.`);
     } else if (result?.reason === 'not-enough-coins') {
       setNotice('Você ainda não tem fichas suficientes para este item.');
+    } else if (result?.reason === 'rank-required') {
+      const requiredTier = RANK_TIERS.find((tier) => tier.id === item.unlockTier);
+      setNotice(`Alcance a categoria ${requiredTier?.label ?? 'necessária'} para desbloquear este item.`);
     } else {
       setNotice('Não foi possível concluir essa compra.');
     }
@@ -205,7 +214,7 @@ function ShopPage({ onPurchase, onCosmeticSelect }: Pick<ArcadeCallbacks, 'onPur
     <div className="page-heading shop-heading"><div><SectionEyebrow>SEU ESTILO, SUAS REGRAS</SectionEyebrow><h1>Loja de itens</h1><p>Um toque de personalidade para cada partida.</p></div><div className="shop-balance"><span><Coins size={15} /></span><div><strong>{formatCoins(state.coins)}</strong><small>FICHAS</small></div></div></div>
     <section className="featured-item"><div className="featured-copy"><span className="featured-label"><Sparkles size={13} /> DESTAQUE DA SEMANA</span><h2>Chegou a<br /><i>galera neon.</i></h2><p>Personagens com brilho próprio, direto do fliperama do futuro.</p><div className="featured-price"><span><Coins size={16} /> {featured.price}</span><button onClick={() => buy(featured)} className="button-light" data-testid="button-buy-featured">{owned(featured) ? equipped(featured) ? 'Equipado' : 'Equipar' : 'Ver personagem'} <ArrowRight size={15} /></button></div></div><div className="featured-figure"><div className="figure-halo" /><div className="figure-body">NN</div><Sparkles className="figure-star" size={23} /><div className="figure-caption">NINA<br /><small>EDIÇÃO NEON</small></div></div></section>
     <div className="section-heading shop-section-title"><div><SectionEyebrow>FEITO PRA VOCÊ</SectionEyebrow><h2>Garimpe aí</h2></div><div className="filter-row compact" role="tablist">{categories.map(category => <button key={category} className={`filter-button ${activeTab === category ? 'active' : ''}`} onClick={() => setActiveTab(category)} data-testid={`button-shop-filter-${category.toLowerCase()}`}>{category}</button>)}</div></div>
-    <div className="shop-grid">{filtered.map(item => <article key={item.id} className={`shop-card item-${item.color}`} data-testid={`card-shop-${item.id}`}><div className="item-art"><div className="item-disc">{item.look}</div><span className="item-type">{item.type}</span>{owned(item) && <span className="owned-tag"><Check size={11} /> NA COLEÇÃO</span>}</div><div className="item-info"><div><h3>{item.name}</h3><span>{item.type === 'PERSONAGEM' ? item.description : item.description}</span></div><button className={`item-buy ${owned(item) ? 'is-owned' : ''}`} onClick={() => buy(item)} data-testid={`button-buy-${item.id}`}>{owned(item) ? equipped(item) ? 'Equipado' : 'Equipar' : <><Coins size={13} /> {item.price}</>}</button></div></article>)}</div>
+    <div className="shop-grid">{filtered.map(item => <article key={item.id} className={`shop-card item-${item.color} rarity-${item.rarity}`} data-testid={`card-shop-${item.id}`}><div className="item-art"><div className="item-sprite-preview"><RunnerSprite characterId={item.kind === 'personagem' ? item.id : state.selectedCharacterId} skinId={item.kind === 'skin' ? item.id : state.selectedSkinId} /></div><span className="item-type">{item.type} · {item.rarity.toUpperCase()}</span>{owned(item) && <span className="owned-tag"><Check size={11} /> NA COLEÇÃO</span>}</div><div className="item-info"><div><h3>{item.name}</h3><span>{item.description}</span></div><button className={`item-buy ${owned(item) ? 'is-owned' : ''}`} onClick={() => buy(item)} data-testid={`button-buy-${item.id}`}>{owned(item) ? equipped(item) ? 'Equipado' : 'Equipar' : item.unlockTier ? <>Categoria {RANK_TIERS.find((tier) => tier.id === item.unlockTier)?.label}</> : <><Coins size={13} /> {item.price}</>}</button></div></article>)}</div>
     {notice && <div className="shop-notice" role="status" data-testid="status-shop-notice"><Check size={15} />{notice}<button onClick={() => setNotice('')} aria-label="Fechar aviso">×</button></div>}
     <div className="shop-footnote"><LockKeyhole size={13} /> Itens e fichas são virtuais. Nenhuma compra envolve dinheiro real.</div>
   </div></Shell>;
@@ -213,14 +222,16 @@ function ShopPage({ onPurchase, onCosmeticSelect }: Pick<ArcadeCallbacks, 'onPur
 
 function ProfilePage() {
   const state = useArcadeState();
-  const streak = currentStreak(state);
+  const streak = getCurrentDailyStreak(state);
   const level = getLevel(state.totalXp);
   const levelProgress = getLevelProgress(state.totalXp);
   const [shared, setShared] = useState(false);
   const achievements = [
     { name: 'Primeira partida', description: 'Complete seu primeiro jogo', unlocked: state.totalGames >= 1, icon: Gamepad2, color: 'purple' },
     { name: 'Fogo aceso', description: 'Jogue 3 dias seguidos', unlocked: streak >= 3, icon: Flame, color: 'gold' },
-    { name: 'Dedos ligeiros', description: 'Faça 25 toques em uma rodada', unlocked: (state.bestScores['toque-rapido'] ?? 0) >= 25, icon: Zap, color: 'purple' },
+    { name: 'Reflexo afiado', description: 'Acerte 10 sinais verdadeiros', unlocked: state.reflexHits >= 10, icon: Zap, color: 'purple' },
+    { name: 'Memória em alta', description: 'Complete três níveis de memória', unlocked: state.memoryWins >= 3, icon: Gem, color: 'purple' },
+    { name: 'Pé na pista', description: 'Corra 300 metros em uma partida', unlocked: state.raceBestDistance >= 300, icon: Award, color: 'gold' },
   ];
   const unlockedAchievements = achievements.filter((badge) => badge.unlocked).length;
   const shareProfile = async () => {
@@ -249,6 +260,35 @@ function ProfilePage() {
   </div></Shell>;
 }
 
+function RankingRoute() {
+  const state = useArcadeState();
+  const tier = getRankTier(state.season.points);
+  const nextTier = getNextRankTier(state.season.points);
+  return <Shell active="ranking"><RankingPage
+    points={state.season.points}
+    tier={tier}
+    nextTier={nextTier}
+    progressPercent={getRankProgress(state.season.points)}
+    daysRemaining={getSeasonDaysRemaining(state.season)}
+    endsAt={state.season.endsAt}
+    history={state.seasonHistory}
+  /></Shell>;
+}
+
+function MissionsRoute() {
+  const state = useArcadeState();
+  return <Shell active="missions"><MissionsPage missions={getMissions(state)} onClaim={(missionId) => { claimMission(missionId); }} /></Shell>;
+}
+
+function CoinShopRoute() {
+  const state = useArcadeState();
+  return <Shell active="loja"><CoinShopPage balance={state.coins} /></Shell>;
+}
+
+function AboutRoute() {
+  return <Shell active="about"><AboutPage /></Shell>;
+}
+
 function Router({ callbacks }: { callbacks: ArcadeCallbacks }) {
   const [location] = useLocation();
   return <ErrorBoundary resetKey={location}><Switch>
@@ -256,14 +296,31 @@ function Router({ callbacks }: { callbacks: ArcadeCallbacks }) {
     <Route path="/games" component={GamesPage} />
     <Route path="/play/:gameId"><PlayPage onGameComplete={callbacks.onGameComplete} /></Route>
     <Route path="/shop"><ShopPage onPurchase={callbacks.onPurchase} onCosmeticSelect={callbacks.onCosmeticSelect} /></Route>
+    <Route path="/coin-shop" component={CoinShopRoute} />
+    <Route path="/ranking" component={RankingRoute} />
+    <Route path="/missions" component={MissionsRoute} />
+    <Route path="/about" component={AboutRoute} />
     <Route path="/profile" component={ProfilePage} />
     <Route component={NotFound} />
   </Switch></ErrorBoundary>;
 }
 
 function App() {
+  useEffect(() => {
+    const refresh = () => refreshSeason();
+    refresh();
+    const timer = window.setInterval(refresh, 60_000);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, []);
+
   const callbacks: ArcadeCallbacks = {
-    onGameComplete: ({ gameId, score }) => completeGame(gameId, score),
+    onGameComplete: ({ gameId, score, performance }) => completeGame(gameId, score, performance),
     onPurchase: ({ itemId }) => purchaseCosmetic(itemId),
     onCosmeticSelect: ({ itemId }) => selectCosmetic(itemId),
   };
